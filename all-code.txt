@@ -1,0 +1,956 @@
+===== README.md =====
+# Apollo Games UI Skeleton
+
+Jednoduchý skeleton modulárního UI pro webové hry ApolloGames.
+
+## Spuštění
+```bash
+npx http-server ui
+```
+Otevři `http://localhost:8080/index.html`.
+
+## Design mód
+- Přepínač v URL `?uiDesign=1`, globální flag `window.__APOLLO_UI_FLAGS__`, nebo klávesa **Ctrl+Shift+D**.
+- V módu lze prvky přetahovat, měnit velikost, snappují se na grid.
+- Uložení **Ctrl+S** nebo tlačítko „Uložit“.
+- Export layoutu tlačítkem „Export“.
+
+## Přidání komponenty
+1. Vytvoř třídu v `ui/js/components` se stejným rozhraním.
+2. Přidej konfiguraci do `ui-layout.default.json`.
+3. V layoutu nastav `type` na název souboru.
+
+## Testy
+Spustíš je příkazem:
+```bash
+npm test
+```
+
+
+===== package.json =====
+{
+  "name": "apollo-ui",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run-tests.js",
+    "bundle": "node scripts/export-all-code.js"
+  }
+}
+
+
+===== scripts/export-all-code.js =====
+#!/usr/bin/env node
+// Skript spojí všechny soubory projektu do jednoho textového souboru
+// pro snadné sdílení např. s GPT-5.
+import { promises as fs } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, '..');
+const output = path.join(root, 'all-code.txt');
+
+// Složky/soubory, které ignorujeme při exportu
+const IGNORE = new Set(['node_modules', '.git', 'all-code.txt']);
+
+async function collect(dir) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  let files = [];
+  for (const entry of entries) {
+    if (IGNORE.has(entry.name)) continue;
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files = files.concat(await collect(fullPath));
+    } else {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+(async () => {
+  const files = await collect(root);
+  let out = '';
+  for (const file of files) {
+    const rel = path.relative(root, file);
+    const data = await fs.readFile(file, 'utf8');
+    out += `===== ${rel} =====\n${data}\n\n`;
+  }
+  await fs.writeFile(output, out);
+  console.log(`Zapsáno ${files.length} souborů do ${output}`);
+})();
+
+
+===== tests/designMode.test.js =====
+import assert from 'assert';
+import {DesignMode} from '../ui/js/core/designMode.js';
+
+const layout = {gameId:'test', components:[], breakpoints:{}};
+const engine = {breakpoint:'sm', load(){}, applyAll(){}};
+
+const dm = new DesignMode(engine, layout);
+// test snap
+assert.strictEqual(dm.snap(13), 16);
+assert.strictEqual(dm.snap(15), 16);
+
+// test undo/redo
+layout.foo = 1;
+dm.pushState();
+dm.layout.foo = 2;
+dm.undoState();
+assert.strictEqual(dm.layout.foo, 1);
+dm.redoState();
+assert.strictEqual(dm.layout.foo, 2);
+
+console.log('designMode OK');
+
+
+===== tests/layoutEngine.test.js =====
+import assert from 'assert';
+import {LayoutEngine} from '../ui/js/core/layoutEngine.js';
+
+// stub global window
+global.window = {
+  innerWidth: 800,
+  innerHeight: 600,
+  addEventListener: ()=>{}
+};
+
+const layout = {
+  breakpoints:{sm:0, md:600, lg:900},
+  components:[{
+    id:'comp', type:'ReelsGrid', zIndex:1,
+    responsive:{
+      sm:{x:'0%',y:'0%',w:'50%',h:'50%',anchor:'TL'},
+      md:{x:'10%',y:'10%',w:'60%',h:'60%',anchor:'TL'}
+    }
+  }]
+};
+
+const engine = new LayoutEngine();
+engine.load(layout);
+const el = {style:{}};
+engine.register('comp', {mount(){},getBoundingBox(){return {}}}, el);
+assert.strictEqual(engine.breakpoint, 'md');
+assert.strictEqual(el.style.width, '480px');
+
+// změna viewportu
+window.innerWidth = 500;
+engine.load(layout);
+engine.applyAll();
+assert.strictEqual(engine.breakpoint, 'sm');
+assert.strictEqual(el.style.width, '250px');
+
+console.log('layoutEngine OK');
+
+
+===== tests/run-tests.js =====
+const tests = ['layoutEngine.test.js', 'designMode.test.js'];
+let failed = 0;
+for (const t of tests) {
+  try {
+    await import('./' + t);
+    console.log('\x1b[32m✓ ' + t + '\x1b[0m');
+  } catch (e) {
+    failed++;
+    console.error('\x1b[31m✗ ' + t + '\x1b[0m', e);
+  }
+}
+if (failed) process.exit(1);
+
+
+===== ui/assets/.gitkeep =====
+
+
+===== ui/index.html =====
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Apollo UI Demo</title>
+  <link rel="stylesheet" href="./styles/base.css" />
+  <link rel="stylesheet" href="./styles/theme.css" />
+  <link rel="stylesheet" href="./styles/design-mode.css" />
+</head>
+<body>
+  <div id="ui-root"></div>
+
+  <div class="demo-controls">
+    <button id="btn-design">Zapnout Design mód</button>
+    <button id="btn-save">Uložit</button>
+    <button id="btn-export">Export</button>
+    <button id="btn-breakpoint">Přepnout breakpoint</button>
+  </div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
+
+
+===== ui/js/app.js =====
+// Inicializace aplikace UI
+import {setLayout} from './core/store.js';
+import {LayoutEngine, loadLayout} from './core/layoutEngine.js';
+import {DesignMode} from './core/designMode.js';
+
+async function init() {
+  const res = await fetch('./ui-layout.default.json');
+  const layout = await res.json();
+  setLayout(layout);
+  const finalLayout = loadLayout(layout);
+
+  const engine = new LayoutEngine();
+  engine.load(finalLayout);
+  const root = document.getElementById('ui-root');
+
+  for (const compCfg of finalLayout.components) {
+    const module = await import(`./components/${compCfg.type}.js`);
+    const instance = new module.default(compCfg.props || {});
+    const el = document.createElement('div');
+    el.className = 'ui-component';
+    el.id = compCfg.id;
+    root.appendChild(el);
+    instance.mount(el);
+    engine.register(compCfg.id, instance, el);
+  }
+
+  const design = new DesignMode(engine, finalLayout);
+  const params = new URLSearchParams(location.search);
+  if (params.get('uiDesign') === '1' || window.__APOLLO_UI_FLAGS__?.designMode) {
+    design.enable();
+  }
+
+  document.getElementById('btn-design').addEventListener('click', () => design.toggle());
+  document.getElementById('btn-save').addEventListener('click', () => design.save());
+  document.getElementById('btn-export').addEventListener('click', () => design.export());
+  document.getElementById('btn-breakpoint').addEventListener('click', () => {
+    const order = ['sm', 'md', 'lg'];
+    const idx = (order.indexOf(engine.breakpoint) + 1) % order.length;
+    engine.setBreakpoint(order[idx]);
+    if (design.active) { design.disable(); design.enable(); }
+  });
+
+  window.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') {
+      design.toggle();
+    }
+  });
+}
+
+init();
+
+
+===== ui/js/components/AutoStartPanel.js =====
+// Panel pro auto-start
+import {eventBus} from '../core/eventBus.js';
+
+export default class AutoStartPanel {
+  constructor(props={}) {
+    this.props = props;
+    this.el = null;
+  }
+  static defaultSize(){ return {w:200,h:80}; }
+  mount(container){
+    this.el = container;
+    this.el.className = 'auto-start-panel';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = 1;
+    input.value = 10;
+    const btn = document.createElement('button');
+    btn.textContent = 'Auto';
+    btn.addEventListener('click', ()=> {
+      eventBus.emit('AUTO/START', parseInt(input.value,10));
+    });
+    this.el.appendChild(input);
+    this.el.appendChild(btn);
+  }
+  unmount(){}
+  update(p){ this.props = {...this.props,...p}; }
+  getBoundingBox(){ return this.el.getBoundingClientRect(); }
+}
+
+
+===== ui/js/components/BetPanel.js =====
+// Panel pro výběr sázky
+import {eventBus} from '../core/eventBus.js';
+
+export default class BetPanel {
+  constructor(props={}) {
+    this.props = props;
+    this.el = null;
+  }
+  static defaultSize() { return {w:400,h:80}; }
+  mount(container) {
+    this.el = container;
+    this.el.className = 'bet-panel';
+    this._render();
+  }
+  _render() {
+    this.el.innerHTML = '';
+    (this.props.denoms||[]).forEach(val => {
+      const btn = document.createElement('button');
+      btn.className = 'bet-panel__button';
+      btn.textContent = val;
+      btn.addEventListener('click', () => eventBus.emit('BET/CHANGE', val));
+      this.el.appendChild(btn);
+    });
+  }
+  unmount() {}
+  update(p){ this.props = {...this.props,...p}; this._render(); }
+  getBoundingBox(){ return this.el.getBoundingClientRect(); }
+}
+
+
+===== ui/js/components/MenuOverlay.js =====
+// Menu overlay s ikonami
+import {eventBus} from '../core/eventBus.js';
+
+export default class MenuOverlay {
+  constructor(props={}) {
+    this.props = props;
+    this.el = null;
+  }
+  static defaultSize(){ return {w:60,h:240}; }
+  mount(container){
+    this.el = container;
+    this.el.className = 'menu-overlay';
+    const buttons = [
+      {id:'refresh', label:'R'},
+      {id:'info', label:'I'},
+      {id:'settings', label:'S'},
+      {id:'history', label:'H'}
+    ];
+    buttons.forEach(b => {
+      const btn = document.createElement('button');
+      btn.className = 'menu-overlay__button';
+      btn.textContent = b.label;
+      btn.addEventListener('click', ()=> eventBus.emit('MENU/'+b.id.toUpperCase()));
+      this.el.appendChild(btn);
+    });
+  }
+  unmount(){}
+  update(p){ this.props={...this.props,...p}; }
+  getBoundingBox(){ return this.el.getBoundingClientRect(); }
+}
+
+
+===== ui/js/components/PaytableModal.js =====
+// Modal s výplatní tabulkou
+import {eventBus} from '../core/eventBus.js';
+
+export default class PaytableModal {
+  constructor(props={}) {
+    this.props = props;
+    this.el = null;
+  }
+  static defaultSize(){ return {w:300,h:300}; }
+  mount(container){
+    this.el = container;
+    this.el.className = 'paytable-modal';
+    this.el.style.display = 'none';
+    this.el.style.background = 'rgba(0,0,0,0.8)';
+    this.el.style.color = '#fff';
+    const close = document.createElement('button');
+    close.textContent = 'X';
+    close.addEventListener('click', () => this.hide());
+    const content = document.createElement('div');
+    content.textContent = 'Paytable';
+    this.el.appendChild(close);
+    this.el.appendChild(content);
+    eventBus.on('UI/OPEN_PAYTABLE', () => this.show());
+    document.addEventListener('keydown', e=> { if(e.key==='Escape') this.hide(); });
+  }
+  show(){ this.el.style.display='block'; }
+  hide(){ this.el.style.display='none'; }
+  unmount(){}
+  update(p){ this.props={...this.props,...p}; }
+  getBoundingBox(){ return this.el.getBoundingClientRect(); }
+}
+
+
+===== ui/js/components/ReelsGrid.js =====
+// Placeholder komponenta herních válců
+export default class ReelsGrid {
+  constructor(props={}) {
+    this.props = props;
+    this.el = null;
+  }
+  static defaultSize() { return {w:400,h:300}; }
+  mount(container) {
+    this.el = container;
+    this.el.classList.add('reels-grid');
+    this.el.textContent = 'Reels';
+    this.el.style.background = 'rgba(255,255,255,0.1)';
+  }
+  unmount() {}
+  update(p) { this.props = {...this.props,...p}; }
+  getBoundingBox() { return this.el.getBoundingClientRect(); }
+}
+
+
+===== ui/js/components/Toast.js =====
+// Jednoduchá toast zpráva
+export default class Toast {
+  constructor(props={}) {
+    this.props = props;
+    this.el = null;
+  }
+  static defaultSize(){ return {w:200,h:40}; }
+  mount(container){
+    this.el = container;
+    this.el.className = 'toast';
+  }
+  show(msg, timeout=2000){
+    this.el.textContent = msg;
+    this.el.classList.add('toast--visible');
+    clearTimeout(this._t);
+    this._t = setTimeout(()=> this.hide(), timeout);
+  }
+  hide(){ this.el.classList.remove('toast--visible'); }
+  unmount(){}
+  update(p){ this.props={...this.props,...p}; }
+  getBoundingBox(){ return this.el.getBoundingClientRect(); }
+}
+
+
+===== ui/js/core/designMode.js =====
+// Design mód pro grafiky
+import {createEl} from './utils/dom.js';
+
+export class DesignMode {
+  constructor(engine, layout) {
+    this.engine = engine;
+    this.layout = layout;
+    this.active = false;
+    this.grid = null;
+    this.gridSize = 8;
+    this.currentEl = null;
+    this.offset = {x:0,y:0};
+    this.undo = [];
+    this.redo = [];
+  }
+
+  toggle() {
+    this.active ? this.disable() : this.enable();
+  }
+
+  enable() {
+    if (this.active) return;
+    this.active = true;
+    this._createGrid();
+    this._initComponents();
+    window.addEventListener('keydown', this._onKey);
+  }
+
+  disable() {
+    if (!this.active) return;
+    this.active = false;
+    this.grid?.remove();
+    this._removeHandles();
+    window.removeEventListener('keydown', this._onKey);
+  }
+
+  _onKey = (e) => {
+    if (e.ctrlKey && e.key === 's') {
+      e.preventDefault();
+      this.save();
+    }
+    if (e.key === 'g') {
+      this.grid.classList.toggle('hidden');
+    }
+    if (e.key === 'z' && e.ctrlKey) {
+      this.undoState();
+    }
+    if (e.key === 'y' && e.ctrlKey) {
+      this.redoState();
+    }
+  }
+
+  _createGrid() {
+    const root = document.getElementById('ui-root');
+    this.grid = createEl('div', 'design-grid', root);
+  }
+
+  _initComponents() {
+    for (const [id, {el}] of this.engine.components) {
+      el.classList.add('designable');
+      this._addHandles(el, id);
+    }
+  }
+
+  _removeHandles() {
+    document.querySelectorAll('.design-handle').forEach(h => h.remove());
+  }
+
+  _addHandles(el, id) {
+    const handle = createEl('div', 'design-handle', el);
+    handle.style.right = '-5px';
+    handle.style.bottom = '-5px';
+    handle.style.cursor = 'se-resize';
+    handle.addEventListener('pointerdown', e => this._startResize(e, el, id));
+    el.addEventListener('pointerdown', e => this._startDrag(e, el, id));
+  }
+
+  _startDrag(e, el, id) {
+    if (e.target.classList.contains('design-handle')) return;
+    this.currentEl = {el, id};
+    this.offset.x = e.offsetX;
+    this.offset.y = e.offsetY;
+    this.pushState();
+    const move = ev => {
+      const x = this.snap(ev.clientX - this.offset.x);
+      const y = this.snap(ev.clientY - this.offset.y);
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      this._storeBox(id, el);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  _startResize(e, el, id) {
+    e.stopPropagation();
+    this.currentEl = {el, id};
+    const rect = el.getBoundingClientRect();
+    this.pushState();
+    const move = ev => {
+      const w = this.snap(ev.clientX - rect.left);
+      const h = this.snap(ev.clientY - rect.top);
+      el.style.width = w + 'px';
+      el.style.height = h + 'px';
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      this._storeBox(id, el);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  snap(v) {
+    return Math.round(v / this.gridSize) * this.gridSize;
+  }
+
+  _storeBox(id, el) {
+    const rect = el.getBoundingClientRect();
+    const vpW = window.innerWidth;
+    const vpH = window.innerHeight;
+    const comp = this.layout.components.find(c => c.id === id);
+    comp.responsive[this.engine.breakpoint] = {
+      x: (rect.left / vpW * 100).toFixed(2) + '%',
+      y: (rect.top / vpH * 100).toFixed(2) + '%',
+      w: (rect.width / vpW * 100).toFixed(2) + '%',
+      h: (rect.height / vpH * 100).toFixed(2) + '%',
+      anchor: 'TL'
+    };
+  }
+
+  save() {
+    const key = 'apollo:ui:layout:' + this.layout.gameId;
+    localStorage.setItem(key, JSON.stringify(this.layout));
+    if (window.onSaveUiLayout) window.onSaveUiLayout(this.layout);
+    alert('Layout uložen');
+  }
+
+  export() {
+    const blob = new Blob([JSON.stringify(this.layout, null, 2)], {type:'application/json'});
+    const a = createEl('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = this.layout.gameId + '-layout.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  pushState() {
+    this.undo.push(JSON.stringify(this.layout));
+    this.redo = [];
+  }
+
+  undoState() {
+    if (!this.undo.length) return;
+    this.redo.push(JSON.stringify(this.layout));
+    this.layout = JSON.parse(this.undo.pop());
+    this.engine.load(this.layout);
+    this.engine.applyAll();
+  }
+
+  redoState() {
+    if (!this.redo.length) return;
+    this.undo.push(JSON.stringify(this.layout));
+    this.layout = JSON.parse(this.redo.pop());
+    this.engine.load(this.layout);
+    this.engine.applyAll();
+  }
+}
+
+
+===== ui/js/core/eventBus.js =====
+// Jednoduchý EventBus pro komunikaci komponent
+export class EventBus {
+  constructor() {
+    this.listeners = {};
+  }
+
+  on(event, cb) {
+    (this.listeners[event] || (this.listeners[event] = [])).push(cb);
+  }
+
+  off(event, cb) {
+    if (!this.listeners[event]) return;
+    this.listeners[event] = this.listeners[event].filter(fn => fn !== cb);
+  }
+
+  emit(event, payload) {
+    (this.listeners[event] || []).forEach(fn => fn(payload));
+  }
+}
+
+export const eventBus = new EventBus();
+
+
+===== ui/js/core/layoutEngine.js =====
+// Engine pro výpočet a aplikaci layoutu
+import {getLayout} from './store.js';
+
+export class LayoutEngine {
+  constructor() {
+    this.components = new Map();
+    this.breakpoint = 'sm';
+    this.safeAreas = {top:0,right:0,bottom:0,left:0};
+    window.addEventListener('resize', () => this.applyAll());
+  }
+
+  load(layout) {
+    this.layout = layout;
+    this.breakpoints = layout.breakpoints;
+    this.safeAreas = layout.safeAreas || this.safeAreas;
+    this.breakpoint = this._detectBreakpoint();
+  }
+
+  register(id, component, el) {
+    this.components.set(id, {component, el});
+    this.applyComponent(id);
+  }
+
+  setBreakpoint(bp) {
+    this.breakpoint = bp;
+    this.applyAll();
+  }
+
+  _detectBreakpoint() {
+    const w = window.innerWidth;
+    let current = 'sm';
+    for (const [bp, val] of Object.entries(this.layout.breakpoints)) {
+      if (w >= val) current = bp;
+    }
+    return current;
+  }
+
+  applyAll() {
+    for (const id of this.components.keys()) {
+      this.applyComponent(id);
+    }
+  }
+
+  applyComponent(id) {
+    const cfg = this.layout.components.find(c => c.id === id);
+    const resp = cfg.responsive[this.breakpoint];
+    const {x,y,w,h} = this._calcBox(resp);
+    const el = this.components.get(id).el;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
+    el.style.zIndex = cfg.zIndex || 1;
+  }
+
+  _calcBox(r) {
+    const vpW = window.innerWidth - this.safeAreas.left - this.safeAreas.right;
+    const vpH = window.innerHeight - this.safeAreas.top - this.safeAreas.bottom;
+    const w = this._parse(r.w, vpW);
+    const h = this._parse(r.h, vpH);
+    let x = this._parse(r.x, vpW) + this.safeAreas.left;
+    let y = this._parse(r.y, vpH) + this.safeAreas.top;
+    // zohlednění anchoru
+    const anchor = r.anchor || 'TL';
+    if (anchor.includes('C')) {
+      x = (vpW - w)/2 + this.safeAreas.left + this._parse(r.x, vpW);
+      y = (vpH - h)/2 + this.safeAreas.top + this._parse(r.y, vpH);
+    } else {
+      if (anchor.includes('R')) x = vpW - w - this._parse(r.x, vpW) + this.safeAreas.left;
+      if (anchor.includes('B')) y = vpH - h - this._parse(r.y, vpH) + this.safeAreas.top;
+    }
+    return {x,y,w,h};
+  }
+
+  _parse(v, size) {
+    if (typeof v === 'number') return v;
+    if (v.endsWith('%')) return parseFloat(v) / 100 * size;
+    return parseFloat(v);
+  }
+}
+
+export function loadLayout(defaultLayout) {
+  const gameId = defaultLayout.gameId;
+  const saved = localStorage.getItem('apollo:ui:layout:' + gameId);
+  return saved ? JSON.parse(saved) : defaultLayout;
+}
+
+
+===== ui/js/core/store.js =====
+// Jednoduchý store pro uchování flagů a layoutu
+const state = {
+  flags: {},
+  layout: null
+};
+
+export function setFlag(key, val) {
+  state.flags[key] = val;
+}
+
+export function getFlag(key) {
+  return state.flags[key];
+}
+
+export function setLayout(layout) {
+  state.layout = layout;
+}
+
+export function getLayout() {
+  return state.layout;
+}
+
+
+===== ui/js/core/utils/dom.js =====
+// Pár pomocných funkcí pro práci s DOM
+export function createEl(tag, className, parent) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (parent) parent.appendChild(el);
+  return el;
+}
+
+export function qs(sel, parent=document) {
+  return parent.querySelector(sel);
+}
+
+
+===== ui/styles/base.css =====
+/* Základní styly a reset */
+:root {
+  --color-bg: #000;
+  --color-fg: #fff;
+  --grid-size: 8px;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: sans-serif;
+}
+
+#ui-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.demo-controls {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  display: flex;
+  gap: 5px;
+  z-index: 1000;
+}
+
+.ui-component {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+
+===== ui/styles/design-mode.css =====
+/* Styly pro design mód */
+.design-grid {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-size: var(--grid-size) var(--grid-size);
+  background-image: linear-gradient(to right, rgba(255,255,255,0.1) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(255,255,255,0.1) 1px, transparent 1px);
+  pointer-events: none;
+  z-index: 999;
+}
+
+.design-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  z-index: 1000;
+}
+
+.design-info {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background: rgba(0,0,0,0.7);
+  padding: 8px;
+  color: var(--color-fg);
+  font-size: 12px;
+  z-index: 1000;
+}
+
+
+===== ui/styles/theme.css =====
+/* Barevné téma - lze snadno vyměnit */
+:root {
+  --color-primary: #e91e63;
+  --color-secondary: #ff9800;
+  --panel-bg: rgba(0,0,0,0.6);
+  --panel-border: #666;
+  --toast-bg: rgba(0,0,0,0.8);
+}
+
+.bet-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  padding: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
+.bet-panel__button {
+  background: var(--color-primary);
+  color: var(--color-fg);
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.menu-overlay {
+  background: var(--panel-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+}
+
+.menu-overlay__button {
+  background: var(--color-secondary);
+  border: none;
+  color: var(--color-fg);
+  padding: 6px;
+  cursor: pointer;
+}
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--toast-bg);
+  padding: 10px 20px;
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+  z-index: 2000;
+}
+
+.toast--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+
+===== ui/ui-layout.default.json =====
+{
+  "gameId": "turboslots81",
+  "version": 1,
+  "breakpoints": { "sm": 0, "md": 768, "lg": 1280 },
+  "components": [
+    {
+      "id": "reels",
+      "type": "ReelsGrid",
+      "zIndex": 10,
+      "responsive": {
+        "sm": { "x":"5%",  "y":"10%", "w":"90%", "h":"55%", "anchor":"C",  "minW":320, "minH":200 },
+        "md": { "x":"8%",  "y":"8%",  "w":"84%", "h":"60%", "anchor":"C" },
+        "lg": { "x":"12%", "y":"6%",  "w":"76%", "h":"62%", "anchor":"C" }
+      },
+      "props": { "rows":3, "cols":5 }
+    },
+    {
+      "id":"bet",
+      "type":"BetPanel",
+      "zIndex":50,
+      "responsive":{
+        "sm":{"x":"0%",  "y":"82%", "w":"100%","h":"16%","anchor":"B"},
+        "md":{"x":"10%", "y":"82%", "w":"80%", "h":"14%","anchor":"B"},
+        "lg":{"x":"18%", "y":"82%", "w":"64%", "h":"12%","anchor":"B"}
+      },
+      "props":{"denoms":[0.1,0.2,0.5,1,2,5,10,20,50,100]}
+    },
+    {
+      "id":"menu",
+      "type":"MenuOverlay",
+      "zIndex":60,
+      "responsive":{
+        "sm":{"x":"88%","y":"20%","w":"10%","h":"60%","anchor":"R"},
+        "md":{"x":"92%","y":"18%","w":"6%", "h":"64%","anchor":"R"},
+        "lg":{"x":"93%","y":"16%","w":"5%", "h":"66%","anchor":"R"}
+      }
+    },
+    {
+      "id":"auto",
+      "type":"AutoStartPanel",
+      "zIndex":55,
+      "responsive":{
+        "sm":{"x":"2%","y":"70%","w":"30%","h":"10%","anchor":"TL"},
+        "md":{"x":"10%","y":"70%","w":"20%","h":"10%","anchor":"TL"},
+        "lg":{"x":"15%","y":"70%","w":"15%","h":"10%","anchor":"TL"}
+      }
+    },
+    {
+      "id":"paytable",
+      "type":"PaytableModal",
+      "zIndex":100,
+      "responsive":{
+        "sm":{"x":"10%","y":"10%","w":"80%","h":"80%","anchor":"TL"},
+        "md":{"x":"20%","y":"15%","w":"60%","h":"70%","anchor":"TL"},
+        "lg":{"x":"30%","y":"10%","w":"40%","h":"60%","anchor":"TL"}
+      }
+    },
+    {
+      "id":"toast",
+      "type":"Toast",
+      "zIndex":200,
+      "responsive":{
+        "sm":{"x":"50%","y":"90%","w":"40%","h":"8%","anchor":"C"},
+        "md":{"x":"50%","y":"90%","w":"30%","h":"8%","anchor":"C"},
+        "lg":{"x":"50%","y":"90%","w":"20%","h":"8%","anchor":"C"}
+      }
+    }
+  ]
+}
+
+
