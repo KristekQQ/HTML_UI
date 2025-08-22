@@ -1,0 +1,60 @@
+/* Barevné téma - lze snadno vyměnit */
+:root {
+  --color-primary: #e91e63;
+  --color-secondary: #ff9800;
+  --panel-bg: rgba(0,0,0,0.6);
+  --panel-border: #666;
+  --toast-bg: rgba(0,0,0,0.8);
+}
+
+.bet-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  padding: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
+.bet-panel__button {
+  background: var(--color-primary);
+  color: var(--color-fg);
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.menu-overlay {
+  background: var(--panel-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+}
+
+.menu-overlay__button {
+  background: var(--color-secondary);
+  border: none;
+  color: var(--color-fg);
+  padding: 6px;
+  cursor: pointer;
+}
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--toast-bg);
+  padding: 10px 20px;
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+  z-index: 2000;
+}
+
+.toast--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
