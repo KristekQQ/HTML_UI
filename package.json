@@ -1,0 +1,9 @@
+{
+  "name": "apollo-ui",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run-tests.js",
+    "bundle": "node scripts/export-all-code.js"
+  }
+}
